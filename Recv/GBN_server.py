@@ -13,8 +13,7 @@ from tqdm import tqdm
 DEBUG = False
 
 os.chdir(os.path.dirname(__file__))
-if not os.path.exists("./checksum.so"):
-    subprocess.run("gcc -O2 -shared -o checksum.so -fPIC checksum.c")
+subprocess.run("gcc -O2 -shared -o checksum.so -fPIC checksum.c")
 
 lib = ctypes.CDLL("./checksum.so")
 lib.get_checksum.argtypes = (ctypes.POINTER(ctypes.c_uint8), ctypes.c_size_t)

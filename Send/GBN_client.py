@@ -13,9 +13,7 @@ import subprocess
 from tqdm import tqdm
 
 os.chdir(os.path.dirname(__file__))
-if not os.path.exists("./checksum.so"):
-    subprocess.run("gcc -O2 -shared -o checksum.so -fPIC checksum.c")
-
+subprocess.run(["gcc", "-O2", "-shared", "-o", "checksum.so", "-fPIC", "checksum.c"])
 lib = ctypes.CDLL("./checksum.so")
 lib.get_checksum.argtypes = (ctypes.POINTER(ctypes.c_uint8), ctypes.c_size_t)
 lib.get_checksum.restype = ctypes.c_uint16
@@ -71,7 +69,7 @@ class GBN_Client:
         self.N = N
         self.base = 0
         self.nextSeqNum = 0
-        self.window_cache = {}
+        self.window_data = {}
 
         self.timer = None
         self.wait_time = wait_time
@@ -116,9 +114,9 @@ class GBN_Client:
         # 重传窗口内的所有数据包
         with self.lock:  # * 加锁阻止主循环发送乱序数据
             for i in range(self.base, minSeq):
-                cache = self.window_cache.get(i, None)
-                if cache:
-                    self.udt_send(i, cache)
+                data = self.window_data.get(i, None)
+                if data is not None:
+                    self.udt_send(i, data)
             self.start_timer()
 
     def receive_acks(self):
@@ -134,10 +132,10 @@ class GBN_Client:
                 self.base = ack_seqNum + 1
 
                 # 如果缓存过多, 则释放
-                if len(self.window_cache) > 2 * self.N:
-                    for seqNum in list(self.window_cache.keys()):
+                if len(self.window_data) > 2 * self.N:
+                    for seqNum in list(self.window_data.keys()):
                         if seqNum < self.base:
-                            self.window_cache.pop(seqNum)
+                            self.window_data.pop(seqNum)
 
                 # 更新定时器状态
                 if self.base == self.nextSeqNum:
@@ -161,7 +159,7 @@ class GBN_Client:
                     while self.nextSeqNum < self.base + self.N and self.nextSeqNum < self.totalSeq:
                         # 读取文件数据, 并缓存
                         data: bytes = f.read(self.MSS)
-                        self.window_cache[self.nextSeqNum] = data
+                        self.window_data[self.nextSeqNum] = data
                         self.pbar.update(len(data))
 
                         # 发送数据
