@@ -15,9 +15,9 @@ DELAY="${5}" # 延时
 
 # 本地模拟测试
 # SERVER=127.0.0.1
-# sudo tc qdisc del dev lo root
-# sudo tc qdisc add dev lo root netem loss "$LOSS" delay "$DELAY"
-# sudo tc qdisc show dev lo root
+sudo tc qdisc del dev lo root
+sudo tc qdisc add dev lo root netem loss "$LOSS" delay "$DELAY"
+sudo tc qdisc show dev lo root
 
 # 真实服务器测试
 SERVER=47.254.22.72
