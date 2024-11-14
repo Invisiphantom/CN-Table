@@ -71,9 +71,10 @@ class GBN_Client:
         self.window_data = {}
 
         self.timer = None
-        self.DevRTT = 0
-        self.EstimatedRTT = 1
-        self.wait_time = 1
+        self.DevRTT = 0.0
+        self.MAX_TIME = 1.0
+        self.EstimatedRTT = self.MAX_TIME
+        self.wait_time = self.MAX_TIME
         self.window_RTT = {}
 
         self.lock = threading.Lock()
@@ -104,7 +105,7 @@ class GBN_Client:
 
     def update_RTT(self, seqNum: int):
         """更新等待时间"""
-        if seqNum not in self.window_RTT:
+        if seqNum not in self.window_RTT or random.random() > 0.05:
             return
 
         SampleRTT = time.time() - self.window_RTT[seqNum]
@@ -126,12 +127,13 @@ class GBN_Client:
 
     def timeout(self):
         """超时重传"""
-        self.wait_time *= 2  # 加倍等待时间
-        minSeq = min(self.nextSeqNum, self.totalSeq)
+        # 超时加倍等待时间
+        self.wait_time = min(self.wait_time * 2.0, self.MAX_TIME)
 
         # 重传窗口内的所有数据包
+        maxSeq = min(self.nextSeqNum, self.totalSeq)
         with self.lock:  # * 加锁阻止主循环发送乱序数据
-            for i in range(self.base, minSeq):
+            for i in range(self.base, maxSeq):
                 data = self.window_data.get(i, None)
                 if data is not None:
                     self.udt_send(i, data)
@@ -145,6 +147,7 @@ class GBN_Client:
             if state == False:
                 continue
 
+            # 计算更新RTT
             self.update_RTT(ack_seqNum)
 
             # 如果分组校验和正确, 则右移窗口基序号

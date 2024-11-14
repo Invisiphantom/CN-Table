@@ -11,7 +11,6 @@ python3 SR_client.py \
     -port 12345 \
     -input "$INPUT" \
     -mss 1400 \
-    -window 64 \
-    -time 0.5 \
+    -window 1024 \
     -loss 0.00 \
     -corrupt 0.00

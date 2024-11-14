@@ -47,12 +47,11 @@ def build_pkt(seqNum: int, data: bytes):
 
 
 class SR_Client:
-    def __init__(self, host, port, filename, MSS, N, wait_time, loss_rate, corrupt_rate):
+    def __init__(self, host, port, filename, MSS, N, loss_rate, corrupt_rate):
         print(f"服务器: {host}:{port}")
         print(f"传输文件名: {filename}")
         print(f"最大负载长度: {MSS}")
         print(f"窗口大小: {N}")
-        print(f"等待时间: {wait_time}")
 
         self.SERVER = (host, port)
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -68,7 +67,12 @@ class SR_Client:
         self.window_acks = {}
         self.window_data = {}
         self.window_timer = {}
-        self.wait_time = wait_time
+
+        self.DevRTT = 0.0
+        self.MAX_TIME = 1.0
+        self.EstimatedRTT = self.MAX_TIME
+        self.wait_time = self.MAX_TIME
+        self.window_RTT = {}
 
         self.loss_rate = loss_rate
         self.corrupt_rate = corrupt_rate
@@ -77,6 +81,10 @@ class SR_Client:
 
     def udt_send(self, seqNum: int, data: bytes):
         """发送(校验和<2> 序列号<4> 数据负载)"""
+        # 记录发送时间
+        self.window_RTT[seqNum] = time.time()
+
+        # 构建发送数据包
         packet = build_pkt(seqNum, data)
 
         # 模拟比特位差错
@@ -89,6 +97,17 @@ class SR_Client:
         # 模拟丢包
         if random.random() >= self.loss_rate:
             self.socket.sendto(packet, self.SERVER)
+
+    def update_RTT(self, seqNum: int):
+        """更新等待时间"""
+        if seqNum not in self.window_RTT or random.random() > 0.01:
+            return
+
+        SampleRTT = time.time() - float(self.window_RTT[seqNum])
+        self.DevRTT = 0.75 * self.DevRTT + 0.25 * abs(SampleRTT - self.EstimatedRTT)
+        self.EstimatedRTT = 0.875 * self.EstimatedRTT + 0.125 * SampleRTT
+        self.wait_time = self.EstimatedRTT + 4 * self.DevRTT
+        del self.window_RTT[seqNum]
 
     def start_timer(self, seqNum):
         """启动定时器"""
@@ -108,7 +127,8 @@ class SR_Client:
 
     def timeout(self, seqNum):
         """超时重传"""
-        # print(f"超时重传: [{seqNum}]")
+        # 超时加倍等待时间
+        self.wait_time = min(self.wait_time * 2.0, self.MAX_TIME)
         data = self.window_data.get(seqNum, None)
         if data is not None:
             self.udt_send(seqNum, data)
@@ -121,6 +141,9 @@ class SR_Client:
             state, ack_seqNum, _ = parse_pkt(ack_pkt)
             if state == False:
                 continue
+
+            # 计算更新RTT
+            self.update_RTT(ack_seqNum)
 
             # 如果分组校验和正确
             if ack_seqNum >= self.base:
@@ -195,7 +218,6 @@ if __name__ == "__main__":
     parser.add_argument("-input", help="发送文件名称", type=str, required=True)
     parser.add_argument("-mss", help="最大负载长度", type=int, required=True)
     parser.add_argument("-window", help="窗口大小", type=int, required=True)
-    parser.add_argument("-time", help="等待时间", type=float, required=True)
     parser.add_argument("-loss", help="丢包率", type=float, required=True)
     parser.add_argument("-corrupt", help="比特差错率", type=float, required=True)
     args = parser.parse_args()
@@ -206,7 +228,6 @@ if __name__ == "__main__":
         filename=args.input,
         MSS=args.mss,
         N=args.window,
-        wait_time=args.time,
         loss_rate=args.loss,
         corrupt_rate=args.corrupt,
     )
