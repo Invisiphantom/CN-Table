@@ -51,12 +51,11 @@ def build_pkt(seqNum: int, data: bytes):
 
 
 class GBN_Client:
-    def __init__(self, host, port, filename, MSS, N, wait_time, loss_rate, corrupt_rate):
+    def __init__(self, host, port, filename, MSS, N, loss_rate, corrupt_rate):
         print(f"服务器: {host}:{port}")
         print(f"传输文件名: {filename}")
         print(f"最大负载长度: {MSS}")
         print(f"窗口大小: {N}")
-        print(f"等待时间: {wait_time}")
 
         self.SERVER = (host, port)
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -72,7 +71,11 @@ class GBN_Client:
         self.window_data = {}
 
         self.timer = None
-        self.wait_time = wait_time
+        self.DevRTT = 0
+        self.EstimatedRTT = 1
+        self.wait_time = 1
+        self.window_RTT = {}
+
         self.lock = threading.Lock()
 
         self.loss_rate = loss_rate
@@ -82,6 +85,10 @@ class GBN_Client:
 
     def udt_send(self, seqNum: int, data: bytes):
         """发送(校验和<2> 序列号<4> 数据负载)"""
+        # 记录发送时间
+        self.window_RTT[seqNum] = time.time()
+
+        # 构建发送数据包
         packet = build_pkt(seqNum, data)
 
         # 模拟比特位差错
@@ -94,6 +101,17 @@ class GBN_Client:
         # 模拟丢包
         if random.random() >= self.loss_rate:
             self.socket.sendto(packet, self.SERVER)
+
+    def update_RTT(self, seqNum: int):
+        """更新等待时间"""
+        if seqNum not in self.window_RTT:
+            return
+
+        SampleRTT = time.time() - self.window_RTT[seqNum]
+        self.DevRTT = 0.75 * self.DevRTT + 0.25 * abs(SampleRTT - self.EstimatedRTT)
+        self.EstimatedRTT = 0.875 * self.EstimatedRTT + 0.125 * SampleRTT
+        self.wait_time = self.EstimatedRTT + 4 * self.DevRTT
+        del self.window_RTT[seqNum]
 
     def start_timer(self):
         """启动定时器"""
@@ -108,8 +126,8 @@ class GBN_Client:
 
     def timeout(self):
         """超时重传"""
+        self.wait_time *= 2  # 加倍等待时间
         minSeq = min(self.nextSeqNum, self.totalSeq)
-        # print(f"超时重传: [{self.base},{minSeq - 1}]")
 
         # 重传窗口内的所有数据包
         with self.lock:  # * 加锁阻止主循环发送乱序数据
@@ -127,15 +145,23 @@ class GBN_Client:
             if state == False:
                 continue
 
+            self.update_RTT(ack_seqNum)
+
             # 如果分组校验和正确, 则右移窗口基序号
             if ack_seqNum >= self.base:
                 self.base = ack_seqNum + 1
 
-                # 如果缓存过多, 则释放
+                # 如果缓存数据过多, 则释放
                 if len(self.window_data) > 2 * self.N:
                     for seqNum in list(self.window_data.keys()):
                         if seqNum < self.base:
                             self.window_data.pop(seqNum)
+
+                # 如果缓存RTT过多, 则释放
+                if len(self.window_RTT) > 2 * self.N:
+                    for seqNum in list(self.window_RTT.keys()):
+                        if seqNum < self.base:
+                            del self.window_RTT[seqNum]
 
                 # 更新定时器状态
                 if self.base == self.nextSeqNum:
@@ -193,7 +219,6 @@ if __name__ == "__main__":
     parser.add_argument("-input", help="发送文件名称", type=str, required=True)
     parser.add_argument("-mss", help="最大负载长度", type=int, required=True)
     parser.add_argument("-window", help="窗口大小", type=int, required=True)
-    parser.add_argument("-time", help="等待时间", type=float, required=True)
     parser.add_argument("-loss", help="丢包率", type=float, required=True)
     parser.add_argument("-corrupt", help="比特差错率", type=float, required=True)
     args = parser.parse_args()
@@ -204,7 +229,6 @@ if __name__ == "__main__":
         filename=args.input,
         MSS=args.mss,
         N=args.window,
-        wait_time=args.time,
         loss_rate=args.loss,
         corrupt_rate=args.corrupt,
     )
