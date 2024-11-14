@@ -12,6 +12,5 @@ python3 Client.py \
     -port 12345 \
     -input "$INPUT" \
     -mss 1400 \
-    -window 64 \
     -loss 0.00 \
     -corrupt 0.00

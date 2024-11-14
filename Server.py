@@ -42,7 +42,6 @@ class Server:
             else:
                 self.run_server = False
                 self.pbar.close()
-                print("文件接收完成")
 
             self.base += 1
 
@@ -80,7 +79,6 @@ class Server:
             else:
                 self.run_server = False
                 self.pbar.close()
-                print("文件接收完成")
 
     def run(self):
         print("服务器启动, 等待客户端连接...")
@@ -103,15 +101,15 @@ class Server:
                 elif self.mode == "SR":
                     self.SR_run(f, client_addr, seqNum, data)
 
-        while True:
-            try:
-                # 不断回复结束ACK, 直到客户端关闭
-                _, client_addr = self.socket.recvfrom(self.bufsize)
-                self.socket.sendto(self.ack_pkt, client_addr)
-            except socket.timeout:
-                print("服务器关闭")
-                self.socket.close()
-                break
+            while True:
+                try:
+                    # 不断回复结束ACK, 直到客户端关闭
+                    _, client_addr = self.socket.recvfrom(self.bufsize)
+                    self.socket.sendto(self.ack_pkt, client_addr)
+                except socket.timeout:
+                    print("文件接收完成, 服务器关闭")
+                    self.socket.close()
+                    break
 
 
 if __name__ == "__main__":
