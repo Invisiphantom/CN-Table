@@ -12,16 +12,21 @@ from Module import parse_pkt, build_pkt
 
 
 class Client:
-    def __init__(self, mode, host, port, filename, MSS, loss_rate, corrupt_rate):
+    def __init__(self, mode, vegas, host, port, filename, MSS):
         assert mode in ["GBN", "SR"]
-        print(f"传输模式: {mode}")
+        assert vegas in ["True", "False"]
         print(f"服务器: {host}:{port}")
         print(f"传输文件名: {filename}")
         print(f"最大负载长度: {MSS}")
+        print("\033[33m" + f"传输模式: {mode}")
+        print("\033[33m" + f"Vegas拥塞控制: {vegas}" + "\033[0m")
 
         self.mode = mode
+        self.vegas = True if vegas == "True" else False
+
         self.SERVER = (host, port)
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.socket.bind(("127.0.0.1", 12350))
 
         self.MSS = MSS
         self.filename = filename
@@ -54,10 +59,6 @@ class Client:
         self.wait_time = self.MAX_TIME
         self.window_RTT = {}
 
-        # 模拟丢包和比特差错
-        self.loss_rate = loss_rate
-        self.corrupt_rate = corrupt_rate
-
         self.P_total_send = 0
         self.pbar = tqdm(total=self.filesize, unit="B", unit_scale=True, desc=self.filename)
 
@@ -71,17 +72,7 @@ class Client:
 
         # 构建发送数据包
         packet = build_pkt(seqNum, data)
-
-        # 模拟比特位差错
-        if random.random() < self.corrupt_rate:
-            bit = random.randint(0, len(packet) * 8 - 1)
-            byte, bit = bit // 8, bit % 8
-            packet = bytearray(packet)
-            packet[byte] ^= 1 << bit
-
-        # 模拟丢包
-        if random.random() >= self.loss_rate:
-            self.socket.sendto(packet, self.SERVER)
+        self.socket.sendto(packet, self.SERVER)
 
     def update_RTT(self, seqNum: int):
         """更新等待时间"""
@@ -93,6 +84,10 @@ class Client:
         self.EstimatedRTT = 0.875 * self.EstimatedRTT + 0.125 * SampleRTT
         self.wait_time = 1.2 * self.EstimatedRTT + 4 * self.DevRTT
         del self.window_RTT[seqNum]
+
+        if self.vegas:
+            if SampleRTT > self.EstimatedRTT:
+                self.cwnd = max(self.cwnd - 100.0, 1.0)
 
     def start_timer(self, seqNum=None):
         """启动定时器"""
@@ -169,7 +164,7 @@ class Client:
                     self.GBN_dupACK += 1
                 if self.GBN_dupACK == 3:
                     self.stop_timer()
-                    self.timeout() # 快速重传
+                    self.timeout()  # 快速重传
                 continue
 
             if self.mode == "GBN":
@@ -264,31 +259,29 @@ class Client:
                 self.udt_send(self.totalSeq, b"")
                 time.sleep(0.1)
 
-            print(f"有效吞吐量: {self.filesize / (self.P_end_time - self.P_start_time) / 1024 ** 2:.2f} MB/s")
-            print(f"流量利用率: {self.filesize / self.P_total_send * 100:.2f}%")
-            print("文件传输完成, 客户端关闭")
+            print("\033[32m" + f"有效吞吐量: {self.filesize / (self.P_end_time - self.P_start_time) / 1024 ** 2:.2f} MB/s")
+            print("\033[32m" + f"流量利用率: {self.filesize / self.P_total_send * 100:.2f}%")
+            print("\033[0m" + "文件传输完成, 客户端关闭")
             self.socket.close()
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("-mode", help="传输模式", type=str, required=True)
+    parser.add_argument("-vegas", help="Vegas拥塞控制", type=str, required=True)
     parser.add_argument("-host", help="服务器地址", type=str, required=True)
     parser.add_argument("-port", help="服务器端口", type=int, required=True)
     parser.add_argument("-input", help="发送文件名称", type=str, required=True)
     parser.add_argument("-mss", help="最大负载长度", type=int, required=True)
-    parser.add_argument("-loss", help="丢包率", type=float, required=True)
-    parser.add_argument("-corrupt", help="比特差错率", type=float, required=True)
     args = parser.parse_args()
 
     client = Client(
         mode=args.mode,
+        vegas=args.vegas,
         host=args.host,
         port=args.port,
         filename=args.input,
         MSS=args.mss,
-        loss_rate=args.loss,
-        corrupt_rate=args.corrupt,
     )
     client.run()
 

@@ -8,6 +8,6 @@ OUTPUT="${2}"
 
 python3 code/Server.py \
     -mode "$MODE" \
-    -port 12345 \
+    -port 12340 \
     -output "$OUTPUT" \
     -mss 2048
