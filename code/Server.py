@@ -104,6 +104,7 @@ class Server:
             while True:
                 try:
                     # 不断回复结束ACK, 直到客户端关闭
+                    self.socket.settimeout(1)
                     _, client_addr = self.socket.recvfrom(self.bufsize)
                     self.socket.sendto(self.ack_pkt, client_addr)
                 except socket.timeout:

@@ -40,6 +40,7 @@ class Client:
 
         # GBN定时器
         self.timer = None
+        self.GBN_dupACK = 0
         self.GBN_reSend = False
 
         # SR定时器
@@ -127,11 +128,13 @@ class Client:
 
         if self.mode == "GBN":
             # 重传窗口内的所有数据包
+            self.GBN_reSend = True
             maxSeq = min(self.nextSeqNum, self.totalSeq)
             for i in range(self.base, maxSeq):
                 data = self.window_data.get(i, None)
                 if data is not None:
                     self.udt_send(i, data)
+            self.GBN_reSend = False
             self.start_timer()
 
         elif self.mode == "SR":
@@ -160,21 +163,29 @@ class Client:
             # 计算更新RTT
             self.update_RTT(ack_seqNum)
 
-            # 右移窗口位置
-            if ack_seqNum >= self.base:
+            # 丢弃旧的ACK
+            if ack_seqNum < self.base:
                 if self.mode == "GBN":
-                    self.base = ack_seqNum + 1
-                    self.expand_cwnd()
-                    self.start_timer()
+                    self.GBN_dupACK += 1
+                if self.GBN_dupACK == 3:
+                    self.stop_timer()
+                    self.timeout() # 快速重传
+                continue
 
-                elif self.mode == "SR":
-                    self.stop_timer(ack_seqNum)
-                    if ack_seqNum not in self.window_acks:
-                        self.expand_cwnd()
-                        self.window_acks[ack_seqNum] = True
-                        # 右移窗口基序号 直到有未确认的分组
-                        while self.base in self.window_acks:
-                            self.base += 1
+            if self.mode == "GBN":
+                self.base = ack_seqNum + 1
+                self.GBN_dupACK = 0
+                self.expand_cwnd()
+                self.start_timer()
+
+            elif self.mode == "SR":
+                self.stop_timer(ack_seqNum)
+                if ack_seqNum not in self.window_acks:
+                    self.expand_cwnd()
+                    self.window_acks[ack_seqNum] = True
+                    # 右移窗口基序号 直到有未确认的分组
+                    while self.base in self.window_acks:
+                        self.base += 1
 
             max_window = max(self.cwnd, 1024)
 
@@ -211,8 +222,13 @@ class Client:
         self.P_start_time = time.time()
         with open(self.filename, "rb") as f:
             while self.nextSeqNum < self.totalSeq:
+                while self.GBN_reSend:
+                    pass
+
                 # 如果窗口未满, 则开始发送
                 while self.nextSeqNum < self.base + int(self.cwnd) and self.nextSeqNum < self.totalSeq:
+                    if self.GBN_reSend:
+                        break
                     # 读取并缓存文件数据
                     data: bytes = f.read(self.MSS)
                     self.window_data[self.nextSeqNum] = data
@@ -231,20 +247,20 @@ class Client:
                     # 更新nextSeqNum
                     self.nextSeqNum += 1
 
-            # 文件传输结束, 等待所有ACK接收
+            print("文件发送结束, 等待所有ACK接收...")
             while self.base < self.totalSeq:
                 pass
 
-            # 停止所有定时器
             self.P_end_time = time.time()
-            if self.mode == "SR":
-                for seqNum in list(self.window_timer.keys()):
-                    self.stop_timer(seqNum)
-            elif self.mode == "GBN":
-                self.stop_timer()
-
-            # 发送结束报文, 并等待结束ACK
+            print("发送结束报文, 并等待结束ACK...")
             while self.base == self.totalSeq:
+                # 停止所有定时器
+                if self.mode == "SR":
+                    for seqNum in list(self.window_timer.keys()):
+                        self.stop_timer(seqNum)
+                        self.window_timer.pop(seqNum)
+                elif self.mode == "GBN":
+                    self.stop_timer()
                 self.udt_send(self.totalSeq, b"")
                 time.sleep(0.1)
 
