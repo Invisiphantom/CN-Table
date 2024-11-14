@@ -6,7 +6,7 @@ cd "$SCRIPT_DIR" || exit
 MODE="${1}"
 OUTPUT="${2}"
 
-python3 Server.py \
+python3 code/Server.py \
     -mode "$MODE" \
     -port 12345 \
     -output "$OUTPUT" \

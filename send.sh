@@ -6,7 +6,7 @@ cd "$SCRIPT_DIR" || exit
 MODE="${1}"
 INPUT="${2}"
 
-python3 Client.py \
+python3 code/Client.py \
     -mode "$MODE" \
     -host 127.0.0.1 \
     -port 12345 \
