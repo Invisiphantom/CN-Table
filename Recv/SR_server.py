@@ -77,7 +77,6 @@ class SR_Server:
                 self.run_server = False
                 self.pbar.close()
                 print("文件接收完成")
-                break
 
             self.base += 1
 

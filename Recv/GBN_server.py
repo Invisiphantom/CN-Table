@@ -28,18 +28,11 @@ def get_checksum(data: bytes):
 def parse_pkt(pkt: bytes):
     """(校验和<2> 序列号<4> 数据负载)"""
     if len(pkt) < 6:
-        if DEBUG:
-            print(f"长度错误: {len(pkt)}")
         return False, None, None
 
     data_checksum: bytes = pkt[:2]
     exp_checksum = get_checksum(pkt[2:])
-
     if data_checksum != exp_checksum:
-        if DEBUG:
-            print("\n校验和错误")
-            print(f"期望: {exp_checksum.hex()}")
-            print(f"实际: {data_checksum.hex()}")
         return False, None, None
 
     seqNum = struct.unpack("I", pkt[2:6])[0]
@@ -60,27 +53,29 @@ class GBN_Server:
         print(f"输出文件名: {output}")
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.socket.bind(("0.0.0.0", port))
+        self.socket.settimeout(0.5)
         self.output = output
         self.bufsize = 10 + mss
         self.exp_seqNum = 0
+
+        self.run_server = True
 
     def run(self):
         print("服务器启动, 等待客户端连接...")
         self.pbar = tqdm(unit="B", unit_scale=True, desc=self.output)
         with open(self.output, "wb") as f:
-            while True:
-                data_pkt, client_addr = self.socket.recvfrom(self.bufsize)
-                state, seqNum, data = parse_pkt(data_pkt)
+            while self.run_server:
+                try:
+                    data_pkt, client_addr = self.socket.recvfrom(self.bufsize)
+                except socket.timeout:
+                    continue
 
+                state, seqNum, data = parse_pkt(data_pkt)
                 if state == False:
                     continue
 
-                # 确保序号正确
+                # 如果序号不匹配
                 if seqNum != self.exp_seqNum:
-                    if DEBUG:
-                        print("\n序号错误")
-                        print(f"期望: {self.exp_seqNum}")
-                        print(f"实际: {seqNum}")
                     self.ack_pkt = build_pkt(self.exp_seqNum - 1, b"ACK")
                     self.socket.sendto(self.ack_pkt, client_addr)
                     continue
@@ -97,14 +92,13 @@ class GBN_Server:
                     self.pbar.update(len(data))
                     f.write(data)
                 else:
+                    self.run_server = False
                     self.pbar.close()
                     print("文件接收完成")
-                    break
 
         while True:
             try:
                 # 不断回复结束ACK, 直到客户端关闭
-                self.socket.settimeout(2)
                 _, client_addr = self.socket.recvfrom(self.bufsize)
                 self.socket.sendto(self.ack_pkt, client_addr)
             except socket.timeout:
