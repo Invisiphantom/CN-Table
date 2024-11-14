@@ -3,14 +3,15 @@
 SCRIPT_DIR="$(dirname "$(realpath "$0")")"
 cd "$SCRIPT_DIR" || exit
 
-INPUT="data/send.gz"
-# INPUT="data/send.jpg"
+MODE="${1}"
+INPUT="${2}"
 
-python3 GBN_client.py \
+python3 Client.py \
+    -mode "$MODE" \
     -host 127.0.0.1 \
     -port 12345 \
     -input "$INPUT" \
     -mss 1400 \
-    -window 64 \
+    -window 1024 \
     -loss 0.00 \
     -corrupt 0.00

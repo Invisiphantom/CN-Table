@@ -10,8 +10,6 @@ import argparse
 import subprocess
 from tqdm import tqdm
 
-DEBUG = False
-
 os.chdir(os.path.dirname(__file__))
 subprocess.run(["gcc", "-O2", "-shared", "-o", "checksum.so", "-fPIC", "checksum.c"])
 lib = ctypes.CDLL("./checksum.so")
@@ -46,18 +44,79 @@ def build_pkt(seqNum: int, data: bytes):
     return checksum + seqNum_bytes + data
 
 
-class GBN_Server:
-    def __init__(self, port, output, mss):
+class Server:
+    def __init__(self, mode, port, output, mss):
+        assert mode in ["SR", "GBN"]
+        print(f"传输模式: {mode}")
         print(f"服务器绑定端口: {port}")
         print(f"输出文件名: {output}")
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.socket.bind(("0.0.0.0", port))
         self.socket.settimeout(0.5)
+
+        self.mode = mode
         self.output = output
         self.bufsize = 10 + mss
-        self.exp_seqNum = 0
-
         self.run_server = True
+
+        if mode == "GBN":
+            self.exp_seqNum = 0
+        elif mode == "SR":
+            self.N = 2048
+            self.base = 0
+            self.window_acks = {}
+            self.window_data = {}
+
+    def SR_write_window(self, f):
+        """将窗口数据写入文件"""
+        while self.base in self.window_acks:
+            self.window_acks.pop(self.base)
+            data = self.window_data.pop(self.base)
+
+            if len(data) != 0:
+                self.pbar.update(len(data))
+                f.write(data)
+            else:
+                self.run_server = False
+                self.pbar.close()
+                print("文件接收完成")
+
+            self.base += 1
+
+    def SR_run(self, f, client_addr, seqNum, data):
+        # 发送 (校验和<2> 已确认序列号<8> "ACK")
+        self.ack_pkt = build_pkt(seqNum, b"ACK")
+        self.socket.sendto(self.ack_pkt, client_addr)
+
+        # 缓存确认号和数据
+        self.window_acks[seqNum] = True
+        self.window_data[seqNum] = data
+
+        # 如果缓存过大, 则写入文件
+        if len(self.window_acks) > self.N:
+            self.SR_write_window(f)
+
+    def GBN_run(self, f, client_addr, seqNum, data):
+        if seqNum != self.exp_seqNum:
+            # 发送 (校验和<2> 已确认序列号<8> "ACK")
+            self.ack_pkt = build_pkt(self.exp_seqNum - 1, b"ACK")
+            self.socket.sendto(self.ack_pkt, client_addr)
+        else:
+            # 发送 (校验和<2> 已确认序列号<8> "ACK")
+            self.ack_pkt = build_pkt(seqNum, b"ACK")
+            self.socket.sendto(self.ack_pkt, client_addr)
+
+            # 更新期望序号
+            self.exp_seqNum += 1
+
+            # 将数据写入文件
+            if len(data) != 0:
+                self.pbar.update(len(data))
+                f.write(data)
+            else:
+                self.run_server = False
+                self.pbar.close()
+                print("文件接收完成")
 
     def run(self):
         print("服务器启动, 等待客户端连接...")
@@ -67,33 +126,18 @@ class GBN_Server:
                 try:
                     data_pkt, client_addr = self.socket.recvfrom(self.bufsize)
                 except socket.timeout:
+                    if self.mode == "SR":
+                        self.SR_write_window(f)
                     continue
 
                 state, seqNum, data = parse_pkt(data_pkt)
                 if state == False:
                     continue
 
-                # 如果序号不匹配
-                if seqNum != self.exp_seqNum:
-                    self.ack_pkt = build_pkt(self.exp_seqNum - 1, b"ACK")
-                    self.socket.sendto(self.ack_pkt, client_addr)
-                    continue
-
-                # 发送 (校验和<2> 已确认序列号<8> "ACK")
-                self.ack_pkt = build_pkt(self.exp_seqNum, b"ACK")
-                self.socket.sendto(self.ack_pkt, client_addr)
-
-                # 更新期望序号
-                self.exp_seqNum += 1
-
-                # 将数据写入文件
-                if len(data) != 0:
-                    self.pbar.update(len(data))
-                    f.write(data)
-                else:
-                    self.run_server = False
-                    self.pbar.close()
-                    print("文件接收完成")
+                if self.mode == "GBN":
+                    self.GBN_run(f, client_addr, seqNum, data)
+                elif self.mode == "SR":
+                    self.SR_run(f, client_addr, seqNum, data)
 
         while True:
             try:
@@ -108,12 +152,14 @@ class GBN_Server:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
+    parser.add_argument("-mode", help="传输模式", type=str, required=True)
     parser.add_argument("-port", help="服务器端口", type=int, required=True)
     parser.add_argument("-output", help="接收文件名称", type=str, required=True)
     parser.add_argument("-mss", help="最大负载长度", type=int, required=True)
     args = parser.parse_args()
 
-    server = GBN_Server(
+    server = Server(
+        mode=args.mode,
         port=args.port,
         output=args.output,
         mss=args.mss,
