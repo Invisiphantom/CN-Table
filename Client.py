@@ -3,47 +3,12 @@
 import os
 import time
 import random
-import struct
 import socket
-import ctypes
 import hashlib
 import argparse
 import threading
-import subprocess
 from tqdm import tqdm
-
-os.chdir(os.path.dirname(__file__))
-subprocess.run(["gcc", "-O2", "-shared", "-o", "checksum.so", "-fPIC", "checksum.c"])
-lib = ctypes.CDLL("./checksum.so")
-lib.get_checksum.argtypes = (ctypes.POINTER(ctypes.c_uint8), ctypes.c_size_t)
-lib.get_checksum.restype = ctypes.c_uint16
-
-
-def get_checksum(data: bytes):
-    data = (ctypes.c_uint8 * len(data)).from_buffer_copy(data)
-    return lib.get_checksum(data, len(data)).to_bytes(2, "big")
-
-
-def parse_pkt(pkt: bytes):
-    """(校验和<2> 序列号<4> 数据负载)"""
-    if len(pkt) < 6:
-        return False, None, None
-
-    data_checksum: bytes = pkt[:2]
-    exp_checksum = get_checksum(pkt[2:])
-    if data_checksum != exp_checksum:
-        return False, None, None
-
-    seqNum = struct.unpack("I", pkt[2:6])[0]
-    data: bytes = pkt[6:] if len(pkt) > 6 else b""
-    return True, seqNum, data
-
-
-def build_pkt(seqNum: int, data: bytes):
-    """(校验和<2> 序列号<4> 数据负载)"""
-    seqNum_bytes = struct.pack("I", seqNum)
-    checksum = get_checksum(seqNum_bytes + data)
-    return checksum + seqNum_bytes + data
+from Module import parse_pkt, build_pkt
 
 
 class Client:
@@ -145,7 +110,7 @@ class Client:
         for seqNum in list(self.window_timer.keys()):
             self.stop_timer(seqNum)
 
-    def timeout(self, seqNum):
+    def timeout(self, seqNum=None):
         """超时重传"""
         # 超时加倍等待时间
         self.wait_time = min(self.wait_time * 2.0, self.MAX_TIME)
@@ -248,7 +213,7 @@ class Client:
                     # 启动定时器
                     if self.mode == "GBN":
                         if self.base == self.nextSeqNum:
-                            self.GBN_start_timer()
+                            self.start_timer()
                     elif self.mode == "SR":
                         self.start_timer(self.nextSeqNum)
 
@@ -257,7 +222,7 @@ class Client:
 
             # 文件传输结束, 等待所有ACK接收
             while self.base < self.totalSeq:
-                time.sleep(0.1)
+                pass
 
             # 停止所有定时器
             if self.mode == "SR":
