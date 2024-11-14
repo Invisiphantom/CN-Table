@@ -26,7 +26,6 @@ class Client:
 
         self.SERVER = (host, port)
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.socket.bind(("127.0.0.1", 12350))
 
         self.MSS = MSS
         self.filename = filename
@@ -288,3 +287,4 @@ if __name__ == "__main__":
     # 打印文件的md5值
     with open(args.input, "rb") as f:
         print(f"{args.input}: ", hashlib.md5(f.read()).hexdigest())
+        print()

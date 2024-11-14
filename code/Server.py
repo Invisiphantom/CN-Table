@@ -132,3 +132,4 @@ if __name__ == "__main__":
     # 打印文件的md5值
     with open(args.output, "rb") as f:
         print(f"{args.output}: ", hashlib.md5(f.read()).hexdigest())
+        print()
